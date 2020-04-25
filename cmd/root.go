@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var (
@@ -39,26 +38,5 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", ".config.json", "config file location (defaults to .config.json)")
-
-	cobra.OnInitialize(initConfig)
-}
-
-func initConfig() {
-	if cfgFile != "" {
-		viper.SetConfigFile(cfgFile)
-	}
-
-	viper.AutomaticEnv()
-
-	err := viper.ReadInConfig()
-	if err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			fmt.Printf("Config file not found at path %s\n", cfgFile)
-		} else {
-			panic(fmt.Errorf("Error: uncaught error! %s", err))
-		}
-	} else {
-		fmt.Printf("Using config file %s\n", viper.ConfigFileUsed())
-	}
+	// cobra.OnInitialize(initConfig)
 }

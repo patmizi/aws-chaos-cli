@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/patmizi/go-cli-boilerplate/cmd"
+	"github.com/patmizi/aws-chaos-cli/cmd"
 )
 
 func main() {

@@ -1,10 +1,13 @@
 package cmd
 
 import (
+  "strings"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/ec2"
+  "github.com/aws/aws-sdk-go/service/autoscaling"
+  "github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/patmizi/aws-chaos-cli/lib"
 	"github.com/google/logger"
 	"github.com/spf13/cobra"
 )
@@ -19,6 +22,11 @@ var (
 	failoverElasticache bool
 	profile             string
 )
+
+type NaclAssociationPair struct {
+  NaclAssociationId string
+  NaclId string
+}
 
 func configureArgs() {
 	failAzCmd.Flags().StringVar(&region, "", "", "The AWS region of choice")
@@ -64,10 +72,16 @@ func failAz(region string, vpcId string, azName string, duration int, limitAsg b
 	)
 
 	ec2Client := ec2.New(sess)
-	// autoscalingClient := autoscaling.New(sess)
+	autoscalingClient := autoscaling.New(sess)
 
 	chaosNaclID := createChaosNacl(ec2Client, vpcId)
-  chaosSubets :=
+	subnetsToChaos := getSubnetsToChaos(ec2Client, vpcId, azName)
+	naclIds := getNaclsToChaos(ec2Client, subnetsToChaos)
+
+	var originalAsg string
+	if limitAsg {
+    originalAsg = limitAutoScaling(autoscalingClient, subnetsToChaos)
+  }
 }
 
 func createChaosNacl(client *ec2.EC2, vpcId string) string {
@@ -133,19 +147,89 @@ func createChaosNacl(client *ec2.EC2, vpcId string) string {
 	return *chaosNacl.NetworkAcl.NetworkAclId
 }
 
-func getSubnetsToChaos(client *ec2.EC2, vpcId string, azName string) {
-  logger.Info("Getting the list of subnets to fail in vpc: %s", vpcId)
+func getSubnetsToChaos(client *ec2.EC2, vpcId string, azName string) []string {
+	logger.Info("Getting the list of subnets to fail in vpc: %s", vpcId)
 
-  subnetList, err := client.DescribeSubnets(&ec2.DescribeSubnetsInput{
+	subnetList, err := client.DescribeSubnets(&ec2.DescribeSubnetsInput{
+		Filters: []*ec2.Filter{
+			{
+				Name:   aws.String("availability-zone"),
+				Values: aws.StringSlice([]string{azName}),
+			},
+			{
+				Name:   aws.String("vpc-id"),
+				Values: aws.StringSlice([]string{azName}),
+			},
+		},
+	})
+	if err != nil {
+		logger.Error("Failed to get a list of subnets: %v", err)
+	}
+
+	var subnetsToChaos []string
+	for i := 0; i < len(subnetList.Subnets); i++ {
+		subnetsToChaos[i] = *subnetList.Subnets[i].SubnetId
+	}
+
+	return subnetsToChaos
+}
+
+func getNaclsToChaos(client *ec2.EC2, subnetsToChaos []string) []NaclAssociationPair {
+  logger.Info("Getting the list of NACLs to blackhole")
+
+  aclClientResponse, err := client.DescribeNetworkAcls(&ec2.DescribeNetworkAclsInput{
     Filters: []*ec2.Filter {
       {
-        Name: aws.String("availability-zone"),
-        Values: [az_name]
+        Name: aws.String("association.subnet-id"),
+        Values: aws.StringSlice(subnetsToChaos),
       },
-      {
-        Name: aws.String("vpc-id"),
-        Values: aws.StringSlice([]string{azName})
+    },
+  })
+  if err != nil {
+    logger.Error("Failed to get a list of NACLs to chaos: %v", err)
+  }
+  networkAcls := aclClientResponse.NetworkAcls
+
+  var naclPairs []NaclAssociationPair
+  for _, nacl := range networkAcls {
+    for _, naclAssociation := range nacl.Associations {
+      for _, el := range subnetsToChaos {
+        if *naclAssociation.SubnetId == el {
+          naclPairs = append(naclPairs, NaclAssociationPair{
+            NaclAssociationId: *naclAssociation.NetworkAclAssociationId,
+            NaclId:            *naclAssociation.NetworkAclId,
+          })
+        }
       }
     }
+  }
+
+  return naclPairs
+}
+
+func limitAutoScaling(client *autoscaling.AutoScaling, subnetsToChaos []string) string {
+  logger.Info("Limit autoscaling to the remaining subnets")
+
+  autoscalingResponse, err := client.DescribeAutoScalingGroups(&autoscaling.DescribeAutoScalingGroupsInput{
+    AutoScalingGroupNames: nil,
   })
+  if err != nil {
+    logger.Error("Failed to describe autoscaling groups: %v", err)
+  }
+  autoScalingGroups := autoscalingResponse.AutoScalingGroups
+
+  // Find ADG that needs to be modified assuming only one ASG should be impacted
+  correctAsg := false
+  for _, asg := range autoScalingGroups {
+    asgName := *asg.AutoScalingGroupName
+    asgSubnets := strings.Split(*asg.VPCZoneIdentifier, ",")
+
+    subnetsToKeep := lib.ListDiff(asgSubnets, subnetsToChaos)
+
+    correctAsg := len(subnetsToKeep) < len(asgSubnets)
+    if correctAsg { break }
+  }
+
+
+
 }

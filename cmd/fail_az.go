@@ -207,7 +207,7 @@ func getNaclsToChaos(client *ec2.EC2, subnetsToChaos []string) []NaclAssociation
   return naclPairs
 }
 
-func limitAutoScaling(client *autoscaling.AutoScaling, subnetsToChaos []string) string {
+func limitAutoScaling(client *autoscaling.AutoScaling, subnetsToChaos []string) (asg string, err error) {
   logger.Info("Limit autoscaling to the remaining subnets")
 
   autoscalingResponse, err := client.DescribeAutoScalingGroups(&autoscaling.DescribeAutoScalingGroupsInput{
@@ -215,21 +215,33 @@ func limitAutoScaling(client *autoscaling.AutoScaling, subnetsToChaos []string) 
   })
   if err != nil {
     logger.Error("Failed to describe autoscaling groups: %v", err)
+    return _, err
   }
   autoScalingGroups := autoscalingResponse.AutoScalingGroups
 
   // Find ADG that needs to be modified assuming only one ASG should be impacted
   correctAsg := false
+  var subnetsToKeep []string
+  var asgName string
   for _, asg := range autoScalingGroups {
-    asgName := *asg.AutoScalingGroupName
+    asgName = *asg.AutoScalingGroupName
     asgSubnets := strings.Split(*asg.VPCZoneIdentifier, ",")
 
-    subnetsToKeep := lib.ListDiff(asgSubnets, subnetsToChaos)
+    subnetsToKeep = lib.ListDiff(asgSubnets, subnetsToChaos)
 
     correctAsg := len(subnetsToKeep) < len(asgSubnets)
     if correctAsg { break }
   }
 
-
+  if correctAsg {
+    vpcZoneIdentifier := strings.Join(subnetsToKeep, ",")
+    autoscalingResponse, err := client.UpdateAutoScalingGroup(&autoscaling.UpdateAutoScalingGroupInput{
+      AutoScalingGroupName:             aws.String(asgName),
+      VPCZoneIdentifier:                aws.String(vpcZoneIdentifier),
+    })
+    if err != nil {
+      logger.Error("Unable to update ASG: %v", err)
+    }
+  }
 
 }

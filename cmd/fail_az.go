@@ -1,15 +1,18 @@
 package cmd
 
 import (
-  "strings"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
+  "errors"
+  "fmt"
+  "github.com/aws/aws-sdk-go/aws"
+  "github.com/aws/aws-sdk-go/aws/credentials"
+  "github.com/aws/aws-sdk-go/aws/session"
   "github.com/aws/aws-sdk-go/service/autoscaling"
   "github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/patmizi/aws-chaos-cli/lib"
-	"github.com/google/logger"
-	"github.com/spf13/cobra"
+  "github.com/google/logger"
+  "github.com/patmizi/aws-chaos-cli/lib"
+  "github.com/spf13/cobra"
+  "strings"
+  "time"
 )
 
 var (
@@ -78,10 +81,36 @@ func failAz(region string, vpcId string, azName string, duration int, limitAsg b
 	subnetsToChaos := getSubnetsToChaos(ec2Client, vpcId, azName)
 	naclIds := getNaclsToChaos(ec2Client, subnetsToChaos)
 
-	var originalAsg string
+	var originalAsg *autoscaling.Group
 	if limitAsg {
-    originalAsg = limitAutoScaling(autoscalingClient, subnetsToChaos)
+	  var err error
+    originalAsg, err = limitAutoScaling(autoscalingClient, subnetsToChaos)
+    if err != nil {
+      logger.Error(err)
+    }
   }
+
+  var rollbackData = applyChaosConfig(ec2Client, naclIds, chaosNaclID)
+
+  if failoverRds {
+
+  }
+
+  if failoverElasticache {
+
+  }
+
+  if duration > 0 {
+    time.Sleep(time.Duration(duration) * time.Second)
+  } else {
+    _, err := fmt.Scanln()
+    if err != nil {
+      logger.Fatal(err)
+    }
+  }
+
+  rollback(ec2Client, rollbackData, autoscalingClient, originalAsg)
+  deleteChaosNacl(ec2Client, chaosNaclID)
 }
 
 func createChaosNacl(client *ec2.EC2, vpcId string) string {
@@ -147,6 +176,17 @@ func createChaosNacl(client *ec2.EC2, vpcId string) string {
 	return *chaosNacl.NetworkAcl.NetworkAclId
 }
 
+func deleteChaosNacl(client *ec2.EC2, chaosNaclId string) {
+  logger.Info("Deleting the Chaos NACL")
+
+  _, err := client.DeleteNetworkAcl(&ec2.DeleteNetworkAclInput{
+    NetworkAclId: aws.String(chaosNaclId),
+  })
+  if err != nil {
+    logger.Error("Could not delete network ACL: %v", err)
+  }
+}
+
 func getSubnetsToChaos(client *ec2.EC2, vpcId string, azName string) []string {
 	logger.Info("Getting the list of subnets to fail in vpc: %s", vpcId)
 
@@ -207,20 +247,18 @@ func getNaclsToChaos(client *ec2.EC2, subnetsToChaos []string) []NaclAssociation
   return naclPairs
 }
 
-func limitAutoScaling(client *autoscaling.AutoScaling, subnetsToChaos []string) (asg string, err error) {
+func limitAutoScaling(client *autoscaling.AutoScaling, subnetsToChaos []string) (*autoscaling.Group, error) {
   logger.Info("Limit autoscaling to the remaining subnets")
 
   autoscalingResponse, err := client.DescribeAutoScalingGroups(&autoscaling.DescribeAutoScalingGroupsInput{
     AutoScalingGroupNames: nil,
   })
   if err != nil {
-    logger.Error("Failed to describe autoscaling groups: %v", err)
-    return _, err
+    return nil, err
   }
   autoScalingGroups := autoscalingResponse.AutoScalingGroups
 
   // Find ADG that needs to be modified assuming only one ASG should be impacted
-  correctAsg := false
   var subnetsToKeep []string
   var asgName string
   for _, asg := range autoScalingGroups {
@@ -230,18 +268,70 @@ func limitAutoScaling(client *autoscaling.AutoScaling, subnetsToChaos []string) 
     subnetsToKeep = lib.ListDiff(asgSubnets, subnetsToChaos)
 
     correctAsg := len(subnetsToKeep) < len(asgSubnets)
-    if correctAsg { break }
-  }
-
-  if correctAsg {
-    vpcZoneIdentifier := strings.Join(subnetsToKeep, ",")
-    autoscalingResponse, err := client.UpdateAutoScalingGroup(&autoscaling.UpdateAutoScalingGroupInput{
-      AutoScalingGroupName:             aws.String(asgName),
-      VPCZoneIdentifier:                aws.String(vpcZoneIdentifier),
-    })
-    if err != nil {
-      logger.Error("Unable to update ASG: %v", err)
+    if correctAsg {
+      vpcZoneIdentifier := strings.Join(subnetsToKeep, ",")
+      _, err := client.UpdateAutoScalingGroup(&autoscaling.UpdateAutoScalingGroupInput{
+        AutoScalingGroupName:             aws.String(asgName),
+        VPCZoneIdentifier:                aws.String(vpcZoneIdentifier),
+      })
+      if err != nil {
+        return nil, err
+      }
+      return asg, nil
     }
   }
 
+  return nil, errors.New("cannot find impacted ASG")
+}
+
+func applyChaosConfig(client *ec2.EC2, naclIds []NaclAssociationPair, chaosNaclId string) []NaclAssociationPair {
+  logger.Info("Saving original config & applying new chaos config")
+
+  var rollbackData []NaclAssociationPair
+
+  for _, nacl := range naclIds {
+    response, err := client.ReplaceNetworkAclAssociation(&ec2.ReplaceNetworkAclAssociationInput{
+      AssociationId: aws.String(nacl.NaclAssociationId),
+      NetworkAclId:  aws.String(chaosNaclId),
+    })
+    if err != nil {
+      logger.Error("Unable to replace network acl association: %v", err)
+    } else {
+      rollbackData = append(rollbackData, NaclAssociationPair{
+        NaclAssociationId: *response.NewAssociationId,
+        NaclId:            nacl.NaclId,
+      })
+    }
+  }
+
+  return rollbackData
+}
+
+func rollback(ec2Client *ec2.EC2, rollbackData []NaclAssociationPair, asClient *autoscaling.AutoScaling, originalAsg *autoscaling.Group) {
+  logger.Info("Rolling back Network ACL to original configuration")
+
+  for _, nacl := range rollbackData {
+    _, err := ec2Client.ReplaceNetworkAclAssociation(&ec2.ReplaceNetworkAclAssociationInput{
+      AssociationId: aws.String(nacl.NaclAssociationId),
+      NetworkAclId:  aws.String(nacl.NaclId),
+    })
+    if err != nil {
+      logger.Error("Could not replace network acl association: %v", err)
+    } else {
+      logger.Info("Rolled back: %s", nacl.NaclId)
+    }
+  }
+
+  if originalAsg != nil {
+    logger.Info("Rolling back AutoScalingGroup to original configuration")
+    _, err := asClient.UpdateAutoScalingGroup(&autoscaling.UpdateAutoScalingGroupInput{
+      AutoScalingGroupName:             originalAsg.AutoScalingGroupName,
+      VPCZoneIdentifier:                originalAsg.VPCZoneIdentifier,
+    })
+    if err != nil {
+      logger.Error("Could not update autoscaling group: %v", err)
+    } else {
+      logger.Info("Reverted back autoscaling group changes")
+    }
+  }
 }

@@ -1,11 +1,11 @@
 
 # Go parameters
-GOCMD=go
+GOCMD=/home/miz/.go/bin/go
 GOBUILD=$(GOCMD) build
 GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
-BINARY_NAME=go-cli-boilerplate.out
+BINARY_NAME=aws-chaos-cli
 BINARY_UNIX=unix_$(BINARY_NAME)
 
 all: test build
@@ -29,4 +29,4 @@ deps:
 build-linux:
 				CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BINARY_UNIX) -v
 docker-build:
-				docker run --rm -it -v "$(GOPATH)":/go -w /go/src/github.com/patmizi/go-cli-boilerplate golang:latest go build -o "$(BINARY_UNIX)" -v
+				docker run --rm -it -v "$(GOPATH)":/go -w /go/src/github.com/patmizi/aws-chaos-cli golang:latest go build -o "$(BINARY_UNIX)" -v

@@ -1,71 +1,67 @@
 package cmd
 
 import (
-  "errors"
   "fmt"
   "github.com/aws/aws-sdk-go/aws"
   "github.com/aws/aws-sdk-go/aws/credentials"
   "github.com/aws/aws-sdk-go/aws/session"
   "github.com/aws/aws-sdk-go/service/autoscaling"
   "github.com/aws/aws-sdk-go/service/ec2"
-  "github.com/google/logger"
-  "github.com/patmizi/aws-chaos-cli/lib"
+  "github.com/golang/glog"
+  . "github.com/patmizi/aws-chaos-cli/lib/chaosutil"
   "github.com/spf13/cobra"
-  "strings"
+  "os"
   "time"
 )
 
-var (
-	region              string
-	vpcId               string
-	azName              string
-	duration            int
-	limitAsg            bool
-	failoverRds         bool
-	failoverElasticache bool
-	profile             string
-)
-
-type NaclAssociationPair struct {
-  NaclAssociationId string
-  NaclId string
+type failAzOptions struct {
+  region              string
+  vpcId               string
+  azName              string
+  duration            int
+  limitAsg            bool
+  failoverRds         bool
+  failoverElasticache bool
+  profile             string
 }
 
-func configureArgs() {
-	failAzCmd.Flags().StringVar(&region, "", "", "The AWS region of choice")
-	failAzCmd.Flags().StringVar(&vpcId, "", "", "The VPC ID of choice")
-	failAzCmd.Flags().StringVar(&azName, "", "", "The name of the availability zone to blackout")
-	failAzCmd.Flags().IntVar(&duration, "", 0, "The duration, in seconds, of the blackout")
-	failAzCmd.Flags().BoolVar(&limitAsg, "", false, "Remove 'failed' AZ from Auto Scaling Group (ASG)")
-	failAzCmd.Flags().BoolVar(&failoverRds, "", false, "Failover RDS if master in the blackout subnet")
-	failAzCmd.Flags().BoolVar(&failoverElasticache, "", false, "Failover Elasticache if primary in the blackout subnet")
-	failAzCmd.Flags().StringVar(&profile, "", "default", "AWS credential profile to use")
+
+func failAzCmd() *cobra.Command {
+  o := &failAzOptions{}
+
+  cmd := &cobra.Command{
+    Use:   "fail-az",
+    Short: "Simulates AZ failure with a Chaos NACL",
+    Long:  "Simulate AZ failure: associate subnet(s) with a Chaos NACL that deny ALL Ingress and Egress traffic - blackhole",
+    Run:   func(cmd *cobra.Command, args []string) {
+      err := failAz(o.region, o.vpcId, o.azName, o.duration, o.limitAsg, o.failoverRds, o.failoverElasticache, o.profile)
+      if err != nil {
+        glog.Fatal("Fail-AZ Failed: %s\n", err)
+        os.Exit(1)
+      }
+    },
+  }
+
+  cmd.Flags().StringVar(&o.region, "region", "", "The AWS region of choice")
+  cmd.Flags().StringVar(&o.vpcId, "vpc-id", "", "The VPC ID of choice")
+  cmd.Flags().StringVar(&o.azName, "az-name", "", "The name of the availability zone to blackout")
+  cmd.Flags().IntVar(&o.duration, "duration", 0, "The duration, in seconds, of the blackout")
+  cmd.Flags().BoolVar(&o.limitAsg, "limit-asg", false, "Remove 'failed' AZ from Auto Scaling Group (ASG)")
+  cmd.Flags().BoolVar(&o.failoverRds, "rds", false, "Failover RDS if master in the blackout subnet")
+  cmd.Flags().BoolVar(&o.failoverElasticache, "elasticache", false, "Failover Elasticache if primary in the blackout subnet")
+  cmd.Flags().StringVar(&o.profile, "profile", "default", "AWS credential profile to use")
+
+  cmd.MarkFlagRequired("region")
+  cmd.MarkFlagRequired("vpc-id")
+  cmd.MarkFlagRequired("az-name")
+
+  return cmd
 }
 
-func configureLogging() {
-	logger.Init("AZFailoverLogger", true, false, nil)
-}
 
-func init() {
-	configureArgs()
-	rootCmd.AddCommand(failAzCmd)
-}
-
-var failAzCmd = &cobra.Command{
-	Use:   "fail-az",
-	Short: "Simulates AZ failure with a Chaos NACL",
-	Long:  "Simulate AZ failure: associate subnet(s) with a Chaos NACL that deny ALL Ingress and Egress traffic - blackhole",
-	Run:   FailAz,
-}
-
-// Simulates AZ failure with a Chaos NACL
-func FailAz(cmd *cobra.Command, args []string) {
-	failAz(region, vpcId, azName, duration, limitAsg, failoverRds, failoverElasticache, profile)
-}
-
-func failAz(region string, vpcId string, azName string, duration int, limitAsg bool, failoverRds bool, failoverElasticache bool, profile string) {
-	configureLogging()
-	logger.Info("Setting up ec2 client for region %s", region)
+func failAz(region string, vpcId string, azName string, duration int, limitAsg bool, failoverRds bool, failoverElasticache bool, profile string) error {
+	print(region)
+	fmt.Printf("Setting up ec2 client for region %s", region)
 
 	sess := session.Must(
 		session.NewSession(&aws.Config{
@@ -77,23 +73,35 @@ func failAz(region string, vpcId string, azName string, duration int, limitAsg b
 	ec2Client := ec2.New(sess)
 	autoscalingClient := autoscaling.New(sess)
 
-	chaosNaclID := createChaosNacl(ec2Client, vpcId)
-	subnetsToChaos := getSubnetsToChaos(ec2Client, vpcId, azName)
-	naclIds := getNaclsToChaos(ec2Client, subnetsToChaos)
+	chaosNaclID, err := CreateChaosNacl(ec2Client, vpcId)
+	if err != nil {
+	  return err
+  }
+
+	subnetsToChaos, err := GetSubnetsToChaos(ec2Client, vpcId, azName)
+	if err != nil {
+	  return err
+  }
+
+	naclIds, err := GetNaclsToChaos(ec2Client, subnetsToChaos)
+	if err != nil {
+	  return err
+  }
 
 	var originalAsg *autoscaling.Group
 	if limitAsg {
-	  var err error
-    originalAsg, err = limitAutoScaling(autoscalingClient, subnetsToChaos)
+    originalAsg, err = LimitAutoScaling(autoscalingClient, subnetsToChaos)
     if err != nil {
-      logger.Error(err)
+      return err
     }
   }
 
-  var rollbackData = applyChaosConfig(ec2Client, naclIds, chaosNaclID)
+  rollbackData, err:= ApplyChaosConfig(ec2Client, naclIds, chaosNaclID)
+  if err != nil {
+    return err
+  }
 
   if failoverRds {
-
   }
 
   if failoverElasticache {
@@ -105,233 +113,19 @@ func failAz(region string, vpcId string, azName string, duration int, limitAsg b
   } else {
     _, err := fmt.Scanln()
     if err != nil {
-      logger.Fatal(err)
+      return err
     }
   }
 
-  rollback(ec2Client, rollbackData, autoscalingClient, originalAsg)
-  deleteChaosNacl(ec2Client, chaosNaclID)
-}
-
-func createChaosNacl(client *ec2.EC2, vpcId string) string {
-	logger.Info("Creating a Chaos Network ACL in %s", vpcId)
-
-	chaosNacl, err := client.CreateNetworkAcl(&ec2.CreateNetworkAclInput{
-		VpcId: &vpcId,
-	})
-	if err != nil {
-		logger.Error("Failed to create network acl: %v", err)
-	}
-
-	// Tag the network ACL with failover-testing-chaos-nacl for identification
-	_, err = client.CreateTags(&ec2.CreateTagsInput{
-		Resources: []*string{
-			chaosNacl.NetworkAcl.NetworkAclId,
-		},
-		Tags: []*ec2.Tag{
-			{
-				Key:   aws.String("Name"),
-				Value: aws.String("failover-testing-chaos-nacl"),
-			},
-		},
-	})
-	if err != nil {
-		logger.Error("Failed to create nacl tags: %v", err)
-	}
-
-	// Create egress entry
-	_, err = client.CreateNetworkAclEntry(&ec2.CreateNetworkAclEntryInput{
-		CidrBlock: aws.String("0.0.0.0/0"),
-		Egress:    aws.Bool(true),
-		PortRange: &ec2.PortRange{
-			From: aws.Int64(0),
-			To:   aws.Int64(65535),
-		},
-		NetworkAclId: chaosNacl.NetworkAcl.NetworkAclId,
-		Protocol:     aws.String("-1"),
-		RuleAction:   aws.String("deny"),
-		RuleNumber:   aws.Int64(100),
-	})
-	if err != nil {
-		logger.Error("Failed to create nacl entry: %v", err)
-	}
-
-	// Create ingress entry
-	_, err = client.CreateNetworkAclEntry(&ec2.CreateNetworkAclEntryInput{
-		CidrBlock: aws.String("0.0.0.0/0"),
-		Egress:    aws.Bool(false),
-		PortRange: &ec2.PortRange{
-			From: aws.Int64(0),
-			To:   aws.Int64(65535),
-		},
-		NetworkAclId: chaosNacl.NetworkAcl.NetworkAclId,
-		Protocol:     aws.String("-1"),
-		RuleAction:   aws.String("deny"),
-		RuleNumber:   aws.Int64(101),
-	})
-	if err != nil {
-		logger.Error("Failed to create nacl entry: %v", err)
-	}
-
-	return *chaosNacl.NetworkAcl.NetworkAclId
-}
-
-func deleteChaosNacl(client *ec2.EC2, chaosNaclId string) {
-  logger.Info("Deleting the Chaos NACL")
-
-  _, err := client.DeleteNetworkAcl(&ec2.DeleteNetworkAclInput{
-    NetworkAclId: aws.String(chaosNaclId),
-  })
+  err = Rollback(ec2Client, rollbackData, autoscalingClient, originalAsg)
   if err != nil {
-    logger.Error("Could not delete network ACL: %v", err)
+    return err
   }
-}
 
-func getSubnetsToChaos(client *ec2.EC2, vpcId string, azName string) []string {
-	logger.Info("Getting the list of subnets to fail in vpc: %s", vpcId)
-
-	subnetList, err := client.DescribeSubnets(&ec2.DescribeSubnetsInput{
-		Filters: []*ec2.Filter{
-			{
-				Name:   aws.String("availability-zone"),
-				Values: aws.StringSlice([]string{azName}),
-			},
-			{
-				Name:   aws.String("vpc-id"),
-				Values: aws.StringSlice([]string{azName}),
-			},
-		},
-	})
-	if err != nil {
-		logger.Error("Failed to get a list of subnets: %v", err)
-	}
-
-	var subnetsToChaos []string
-	for i := 0; i < len(subnetList.Subnets); i++ {
-		subnetsToChaos[i] = *subnetList.Subnets[i].SubnetId
-	}
-
-	return subnetsToChaos
-}
-
-func getNaclsToChaos(client *ec2.EC2, subnetsToChaos []string) []NaclAssociationPair {
-  logger.Info("Getting the list of NACLs to blackhole")
-
-  aclClientResponse, err := client.DescribeNetworkAcls(&ec2.DescribeNetworkAclsInput{
-    Filters: []*ec2.Filter {
-      {
-        Name: aws.String("association.subnet-id"),
-        Values: aws.StringSlice(subnetsToChaos),
-      },
-    },
-  })
+  err = DeleteChaosNacl(ec2Client, chaosNaclID)
   if err != nil {
-    logger.Error("Failed to get a list of NACLs to chaos: %v", err)
-  }
-  networkAcls := aclClientResponse.NetworkAcls
-
-  var naclPairs []NaclAssociationPair
-  for _, nacl := range networkAcls {
-    for _, naclAssociation := range nacl.Associations {
-      for _, el := range subnetsToChaos {
-        if *naclAssociation.SubnetId == el {
-          naclPairs = append(naclPairs, NaclAssociationPair{
-            NaclAssociationId: *naclAssociation.NetworkAclAssociationId,
-            NaclId:            *naclAssociation.NetworkAclId,
-          })
-        }
-      }
-    }
+    return err
   }
 
-  return naclPairs
-}
-
-func limitAutoScaling(client *autoscaling.AutoScaling, subnetsToChaos []string) (*autoscaling.Group, error) {
-  logger.Info("Limit autoscaling to the remaining subnets")
-
-  autoscalingResponse, err := client.DescribeAutoScalingGroups(&autoscaling.DescribeAutoScalingGroupsInput{
-    AutoScalingGroupNames: nil,
-  })
-  if err != nil {
-    return nil, err
-  }
-  autoScalingGroups := autoscalingResponse.AutoScalingGroups
-
-  // Find ADG that needs to be modified assuming only one ASG should be impacted
-  var subnetsToKeep []string
-  var asgName string
-  for _, asg := range autoScalingGroups {
-    asgName = *asg.AutoScalingGroupName
-    asgSubnets := strings.Split(*asg.VPCZoneIdentifier, ",")
-
-    subnetsToKeep = lib.ListDiff(asgSubnets, subnetsToChaos)
-
-    correctAsg := len(subnetsToKeep) < len(asgSubnets)
-    if correctAsg {
-      vpcZoneIdentifier := strings.Join(subnetsToKeep, ",")
-      _, err := client.UpdateAutoScalingGroup(&autoscaling.UpdateAutoScalingGroupInput{
-        AutoScalingGroupName:             aws.String(asgName),
-        VPCZoneIdentifier:                aws.String(vpcZoneIdentifier),
-      })
-      if err != nil {
-        return nil, err
-      }
-      return asg, nil
-    }
-  }
-
-  return nil, errors.New("cannot find impacted ASG")
-}
-
-func applyChaosConfig(client *ec2.EC2, naclIds []NaclAssociationPair, chaosNaclId string) []NaclAssociationPair {
-  logger.Info("Saving original config & applying new chaos config")
-
-  var rollbackData []NaclAssociationPair
-
-  for _, nacl := range naclIds {
-    response, err := client.ReplaceNetworkAclAssociation(&ec2.ReplaceNetworkAclAssociationInput{
-      AssociationId: aws.String(nacl.NaclAssociationId),
-      NetworkAclId:  aws.String(chaosNaclId),
-    })
-    if err != nil {
-      logger.Error("Unable to replace network acl association: %v", err)
-    } else {
-      rollbackData = append(rollbackData, NaclAssociationPair{
-        NaclAssociationId: *response.NewAssociationId,
-        NaclId:            nacl.NaclId,
-      })
-    }
-  }
-
-  return rollbackData
-}
-
-func rollback(ec2Client *ec2.EC2, rollbackData []NaclAssociationPair, asClient *autoscaling.AutoScaling, originalAsg *autoscaling.Group) {
-  logger.Info("Rolling back Network ACL to original configuration")
-
-  for _, nacl := range rollbackData {
-    _, err := ec2Client.ReplaceNetworkAclAssociation(&ec2.ReplaceNetworkAclAssociationInput{
-      AssociationId: aws.String(nacl.NaclAssociationId),
-      NetworkAclId:  aws.String(nacl.NaclId),
-    })
-    if err != nil {
-      logger.Error("Could not replace network acl association: %v", err)
-    } else {
-      logger.Info("Rolled back: %s", nacl.NaclId)
-    }
-  }
-
-  if originalAsg != nil {
-    logger.Info("Rolling back AutoScalingGroup to original configuration")
-    _, err := asClient.UpdateAutoScalingGroup(&autoscaling.UpdateAutoScalingGroupInput{
-      AutoScalingGroupName:             originalAsg.AutoScalingGroupName,
-      VPCZoneIdentifier:                originalAsg.VPCZoneIdentifier,
-    })
-    if err != nil {
-      logger.Error("Could not update autoscaling group: %v", err)
-    } else {
-      logger.Info("Reverted back autoscaling group changes")
-    }
-  }
+  return nil
 }

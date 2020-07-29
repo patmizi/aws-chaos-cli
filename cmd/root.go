@@ -1,30 +1,32 @@
+/*
+Copyright © 2020 Patrick Miziewicz <patrick.miziewicz@gmail.com>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 package cmd
 
-import (
-	"fmt"
+import "github.com/spf13/cobra"
 
-	"github.com/spf13/cobra"
-)
+func RootCmd() (*cobra.Command, error) {
+  cmd := &cobra.Command{
+    Use:          "aws-chaos-cli",
+    Short:        "CLI tool to inject failure into AWS infrastructure",
+    Long:         "TODO",
+  }
 
-var (
-	// Viper config location
-	cfgFile string
-)
+  cmd.AddCommand(
+    failAzCmd(),
+  )
 
-var rootCmd = &cobra.Command{
-	Use:   "go-cli-boileprlate",
-	Short: "This is a Cobra/Viper boilerplate",
-	Long:  `This is a Cobra/Viper boilerplate program written by patmizi in Go.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("Inside rootCmd Run with args: %v\n", args)
-	},
-}
-
-// Execute will execute the root command
-func Execute() error {
-	return rootCmd.Execute()
-}
-
-func init() {
-	// cobra.OnInitialize(initConfig)
+  return cmd, nil
 }

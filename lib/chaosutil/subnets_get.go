@@ -18,7 +18,7 @@ func GetSubnetsToChaos(client *ec2.EC2, vpcId string, azName string) ([]string, 
       },
       {
         Name:   aws.String("vpc-id"),
-        Values: aws.StringSlice([]string{azName}),
+        Values: aws.StringSlice([]string{vpcId}),
       },
     },
   })
@@ -26,7 +26,7 @@ func GetSubnetsToChaos(client *ec2.EC2, vpcId string, azName string) ([]string, 
     return make([]string, 0), errors.Wrap(err, "Failed to get a list of subnets")
   }
 
-  var subnetsToChaos []string
+  var subnetsToChaos = make([]string, len(subnetList.Subnets))
   for i := 0; i < len(subnetList.Subnets); i++ {
     subnetsToChaos[i] = *subnetList.Subnets[i].SubnetId
   }

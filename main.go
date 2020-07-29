@@ -16,15 +16,15 @@ limitations under the License.
 package main
 
 import (
-  . "github.com/patmizi/aws-chaos-cli/cmd"
   "github.com/golang/glog"
+  . "github.com/patmizi/aws-chaos-cli/cmd"
   "os"
 )
 
 func main() {
   cmd, err := RootCmd()
   if err != nil {
-    glog.Errorf("%+v", err)
+    glog.Fatalf("%+v", err)
     os.Exit(1)
   }
 

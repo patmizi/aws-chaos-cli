@@ -18,9 +18,9 @@ func Rollback(ec2Client *ec2.EC2, rollbackData []NaclAssociationPair, asClient *
       NetworkAclId:  aws.String(nacl.NaclId),
     })
     if err != nil {
-      glog.Error("(Skipping) Could not replace network acl association: %v\n", err)
+      glog.Error("(Skipping) Could not replace network acl association\n")
     } else {
-      glog.Info("Rolled back: %s\n", nacl.NaclId)
+      glog.Infof("Rolled back\n")
     }
   }
 

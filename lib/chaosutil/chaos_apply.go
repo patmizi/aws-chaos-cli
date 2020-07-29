@@ -1,8 +1,6 @@
 package chaosutil
 
 import (
-  "encoding/json"
-  "fmt"
   "github.com/aws/aws-sdk-go/aws"
   "github.com/aws/aws-sdk-go/service/ec2"
   "github.com/golang/glog"
@@ -11,9 +9,6 @@ import (
 
 func ApplyChaosConfig(client *ec2.EC2, naclIds []NaclAssociationPair, chaosNaclId string) ([]NaclAssociationPair, error) {
   glog.Info("Saving original config & applying new chaos config\n")
-
-  fmt.Println(chaosNaclId)
-  fmt.Println(json.Marshal(naclIds))
 
   var rollbackData []NaclAssociationPair
 

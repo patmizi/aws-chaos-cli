@@ -8,9 +8,12 @@ import (
   "github.com/aws/aws-sdk-go/service/autoscaling"
   "github.com/aws/aws-sdk-go/service/ec2"
   "github.com/golang/glog"
+  "os"
+
+  //"github.com/golang/glog"
   . "github.com/patmizi/aws-chaos-cli/lib/chaosutil"
   "github.com/spf13/cobra"
-  "os"
+  //"os"
   "time"
 )
 
@@ -36,7 +39,7 @@ func failAzCmd() *cobra.Command {
     Run:   func(cmd *cobra.Command, args []string) {
       err := failAz(o.region, o.vpcId, o.azName, o.duration, o.limitAsg, o.failoverRds, o.failoverElasticache, o.profile)
       if err != nil {
-        glog.Fatal("Fail-AZ Failed: %s\n", err)
+        glog.Fatalf("Fail-AZ Failed: %w\n", err)
         os.Exit(1)
       }
     },
@@ -61,7 +64,7 @@ func failAzCmd() *cobra.Command {
 
 func failAz(region string, vpcId string, azName string, duration int, limitAsg bool, failoverRds bool, failoverElasticache bool, profile string) error {
 	print(region)
-	fmt.Printf("Setting up ec2 client for region %s", region)
+	fmt.Printf("Setting up ec2 client for region %s\n", region)
 
 	sess := session.Must(
 		session.NewSession(&aws.Config{
@@ -70,8 +73,10 @@ func failAz(region string, vpcId string, azName string, duration int, limitAsg b
 		}),
 	)
 
-	ec2Client := ec2.New(sess)
-	autoscalingClient := autoscaling.New(sess)
+	//ec2Client := ec2.New(sess, aws.NewConfig().WithLogLevel(aws.LogDebugWithHTTPBody))
+	//autoscalingClient := autoscaling.New(sess, aws.NewConfig().WithLogLevel(aws.LogDebugWithHTTPBody))
+  ec2Client := ec2.New(sess)
+  autoscalingClient := autoscaling.New(sess)
 
 	chaosNaclID, err := CreateChaosNacl(ec2Client, vpcId)
 	if err != nil {
@@ -111,7 +116,7 @@ func failAz(region string, vpcId string, azName string, duration int, limitAsg b
   if duration > 0 {
     time.Sleep(time.Duration(duration) * time.Second)
   } else {
-    _, err := fmt.Scanln()
+    _, err := fmt.Scanln("Press Enter To Rollback NACLs...")
     if err != nil {
       return err
     }

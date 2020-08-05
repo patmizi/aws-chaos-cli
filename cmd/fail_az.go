@@ -39,8 +39,8 @@ func failAzCmd() *cobra.Command {
     Run:   func(cmd *cobra.Command, args []string) {
       err := failAz(o.region, o.vpcId, o.azName, o.duration, o.limitAsg, o.failoverRds, o.failoverElasticache, o.profile)
       if err != nil {
-        glog.Fatalf("Fail-AZ Failed: %w\n", err)
-        os.Exit(1)
+       glog.Fatalf("Fail-AZ Failed: %w\n", err)
+       os.Exit(1)
       }
     },
   }
@@ -116,7 +116,8 @@ func failAz(region string, vpcId string, azName string, duration int, limitAsg b
   if duration > 0 {
     time.Sleep(time.Duration(duration) * time.Second)
   } else {
-    _, err := fmt.Scanln("Press Enter To Rollback NACLs...")
+    fmt.Print("Press Enter to rollback chaos config...")
+    _, err := fmt.Scanln()
     if err != nil {
       return err
     }

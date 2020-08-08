@@ -4,6 +4,7 @@
 *.dll
 *.so
 *.dylib
+bin/*
 
 # Test binary, built with `go test -c`
 *.test
@@ -15,4 +16,6 @@
 # vendor/
 
 aws-chaos-cli
+aws-chaos-cli-linux
+aws-chaos-cli-windows
 .vscode

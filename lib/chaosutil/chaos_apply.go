@@ -15,7 +15,7 @@ func ApplyChaosConfig(client *ec2.EC2, naclIds []NaclAssociationPair, chaosNaclI
   for _, nacl := range naclIds {
     response, err := client.ReplaceNetworkAclAssociation(&ec2.ReplaceNetworkAclAssociationInput{
       AssociationId: aws.String(nacl.NaclAssociationId),
-      NetworkAclId:  aws.String(chaosNagolanclId),
+      NetworkAclId:  aws.String(chaosNaclId),
     })
     if err != nil {
       glog.Errorf("(Skipping) Unable to replace network acl association for %s: %v\n", nacl.NaclAssociationId, err)

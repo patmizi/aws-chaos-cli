@@ -39,7 +39,7 @@ func failAzCmd() *cobra.Command {
     Run:   func(cmd *cobra.Command, args []string) {
       err := failAz(o.region, o.vpcId, o.azName, o.duration, o.limitAsg, o.failoverRds, o.failoverElasticache, o.profile)
       if err != nil {
-       glog.Fatalf("Fail-AZ Failed: %w\n", err)
+       glog.Fatalf("Fail-AZ Failed: %v\n", err)
        os.Exit(1)
       }
     },

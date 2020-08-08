@@ -20,7 +20,7 @@ func LimitAutoScaling(client *autoscaling.AutoScaling, subnetsToChaos []string) 
   }
   autoScalingGroups := autoscalingResponse.AutoScalingGroups
 
-  // Find ADG that needs to be modified assuming only one ASG should be impacted
+  // Find ASG that needs to be modified assuming only one ASG should be impacted
   var subnetsToKeep []string
   var asgName string
   for _, asg := range autoScalingGroups {

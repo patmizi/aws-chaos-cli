@@ -50,7 +50,7 @@ jobs:
           make build-macos
 
       - name: upload artifacts
-        uses: actions/upload-artifact@master
+        uses: AButler/upload-release-assets@v2.0
         with:
-          name: binaries
-          path: bin/
+          files: 'bin/*'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}

@@ -19,3 +19,4 @@ aws-chaos-cli
 aws-chaos-cli-linux
 aws-chaos-cli-windows
 .vscode
+.idea

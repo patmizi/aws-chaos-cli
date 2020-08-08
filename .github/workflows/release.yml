@@ -47,6 +47,7 @@ jobs:
         run: |
           make build-linux
           make build-windows
+          make build-macos
 
       - name: upload artifacts
         uses: actions/upload-artifact@master

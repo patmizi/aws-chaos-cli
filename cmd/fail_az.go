@@ -50,8 +50,8 @@ func failAzCmd() *cobra.Command {
   cmd.Flags().StringVar(&o.azName, "az-name", "", "The name of the availability zone to blackout")
   cmd.Flags().IntVar(&o.duration, "duration", 0, "The duration, in seconds, of the blackout")
   cmd.Flags().BoolVar(&o.limitAsg, "limit-asg", false, "Remove 'failed' AZ from Auto Scaling Group (ASG)")
-  cmd.Flags().BoolVar(&o.failoverRds, "rds", false, "Failover RDS if master in the blackout subnet")
-  cmd.Flags().BoolVar(&o.failoverElasticache, "elasticache", false, "Failover Elasticache if primary in the blackout subnet")
+  //cmd.Flags().BoolVar(&o.failoverRds, "rds", false, "Failover RDS if master in the blackout subnet")
+  //cmd.Flags().BoolVar(&o.failoverElasticache, "elasticache", false, "Failover Elasticache if primary in the blackout subnet")
   cmd.Flags().StringVar(&o.profile, "profile", "default", "AWS credential profile to use")
 
   cmd.MarkFlagRequired("region")

@@ -21,7 +21,7 @@ func RootCmd() (*cobra.Command, error) {
   cmd := &cobra.Command{
     Use:          "aws-chaos-cli",
     Short:        "CLI tool to inject failure into AWS infrastructure",
-    Long:         "TODO",
+    Long:         "CLI tool created with the sole purpose of injecting failure into AWS infrastructure in a convenient manner",
   }
 
   cmd.AddCommand(
